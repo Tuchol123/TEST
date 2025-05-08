@@ -34,8 +34,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RX_BUFFER_SIZE 50 // Zwiększ rozmiar bufora, aby pomieścić dłuższe odpowiedzi
-#define AT_COMMAND "AT\r\n" // Zmień na komendę, którą chcesz wysłać
-#define EXPECTED_RESPONSE "OK\r\n" // Zdefiniuj oczekiwaną odpowiedź, jeśli w ogóle jest
 #define RESPONSE_TIMEOUT 2000      // Zwiększ timeout, aby dać modułowi więcej czasu
 /* USER CODE END PD */
 
@@ -58,7 +56,7 @@ char rx1_buffer[RX_BUFFER_SIZE];
 uint8_t rx1_index = 0;
 char adcMessage[32];
 uint32_t adcValue = 0;
-bool isStarted = false;
+volatile bool isStarted = false;
 uint32_t distance = 0; // w metrach
 uint32_t current_mA = 0;
 uint8_t battery = 100; // symulowana bateria (0–100%)
@@ -124,6 +122,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   HAL_UART_Receive_IT(&huart1, &rx1_char, 1);  // odbiór UART
   HAL_ADC_Start(&hadc1);  // Start ADC
+  isStarted = false;  // Wymuś "STOP" po każdym restarcie
+  HAL_UART_Transmit(&huart1, (uint8_t *)"Uruchom przyciskiem\n", strlen("Uruchom przyciskiem\n"), HAL_MAX_DELAY);
   while (1)
   {
       if (isStarted)
@@ -146,6 +146,7 @@ int main(void)
                    battery, current_mA, distance);
           HAL_UART_Transmit(&huart1, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
       }
+
 
       HAL_Delay(500);
   }
@@ -419,9 +420,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
       rx1_buffer[rx1_index] = '\0';  // zakończ string
 
       if (strcmp(rx1_buffer, "RESET\r\n") == 0) {
-          HAL_UART_Transmit(&huart1, (uint8_t *)"Resetting...\r\n", strlen("Resetting...\r\n"), HAL_MAX_DELAY);
-          HAL_Delay(100); // mały delay przed resetem
-          NVIC_SystemReset();
+    	  // Wyczyść wszystkie dane i wróć do "startu"
+    	     __disable_irq();  // zabezpiecz przed przerwaniami
+
+    	     isStarted = false;
+    	     distance = 0;
+    	     current_mA = 0;
+
+    	     HAL_GPIO_WritePin(LEDZIK_GPIO_Port, LEDZIK_Pin, GPIO_PIN_RESET);
+
+    	     __enable_irq();
+
+    	     HAL_UART_Transmit(&huart1, (uint8_t *)"Gotowe. Wciśnij przycisk START.\r\n", strlen("Gotowe. Wciśnij przycisk START.\r\n"), HAL_MAX_DELAY);
+
       }
       else
       {
